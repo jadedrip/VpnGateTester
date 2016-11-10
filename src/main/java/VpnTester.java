@@ -62,6 +62,7 @@ public class VpnTester {
     }
 
     private static EventLoopGroup group = new NioEventLoopGroup();
+    static Charset utf8 = Charset.forName("utf-8");
 
     private static void parseVpnLine(final String line) {
         final long curr = System.currentTimeMillis();
@@ -72,13 +73,20 @@ public class VpnTester {
         if ("IP".equals(host)) return;
         int port = 995;
 
-        String[] split1 = host.split(":");
-        if (split1.length > 1) {
-            host = split1[0];
-            port = Integer.valueOf(split1[1]);
+        String s = split[14];
+        if (s.isEmpty()) return;  // No ovpn file
+
+        ByteBuf decode = Base64.decode(Unpooled.wrappedBuffer(s.getBytes()));
+        String ovpn = decode.toString(utf8);
+        for (String o : ovpn.split("\r\n")) {
+            if (!o.startsWith("remote")) continue;
+            String[] strings = o.split(" ");
+            if (strings.length >= 3) {
+                host = strings[1];
+                port = Integer.valueOf(strings[2]);
+            }
         }
 
-        Charset utf8 = Charset.forName("utf-8");
         // create tcp/ip connector
         Bootstrap b = new Bootstrap();
         String finalHost = host;
@@ -114,7 +122,7 @@ public class VpnTester {
         ChannelFuture f;
         try {
             String country = split[5];
-            System.out.println("Trying " + split[0] + " IP: " + finalHost + " Country:" + country);
+            System.out.println("Trying " + split[0] + " \tIP: " + finalHost + " \tPort:" + port + " \tCountry:" + country);
 
             b.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 1000);
             f = b.connect(host, port);
@@ -126,22 +134,18 @@ public class VpnTester {
                     File dir = new File(country);
                     dir.mkdir();
                 }
-                System.out.println(split[0] + " IP: " + finalHost + " MS:" + l + " Country:" + country);
+                System.out.println("\t" + split[0] + " \tIP: " + finalHost + " \tPort:" + port + " \tCountry:" + country + " \tMS:" + l);
 
                 // #HostName,IP,Score,Ping,Speed,CountryLong,CountryShort,NumVpnSessions,Uptime,TotalUsers,TotalTraffic,LogType,Operator,Message,OpenVPN_ConfigData_Base64
-                String s = split[14];
-                if (!s.isEmpty()) {  // Write a ovpn file
-                    ByteBuf decode = Base64.decode(Unpooled.wrappedBuffer(s.getBytes()));
-                    String x = l + "_" + split[0];
-                    String filename = country.isEmpty() ? x : country + File.separator + x;
-                    File n = new File(filename + ".ovpn");
-                    FileWriter writer = new FileWriter(n);
-                    writer.write(decode.toString(utf8));
-                    writer.write("\r\n");
-                    if (!add.isEmpty()) writer.write(add);
-                    writer.flush();
-                    writer.close();
-                }
+                String x = l + "_" + split[0];
+                String filename = country.isEmpty() ? x : country + File.separator + x;
+                File n = new File(filename + ".ovpn");
+                FileWriter writer = new FileWriter(n);
+                writer.write(ovpn);
+                writer.write("\r\n");
+                if (!add.isEmpty()) writer.write(add);
+                writer.flush();
+                writer.close();
             }
 
             f.channel().close();
